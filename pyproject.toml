@@ -1,0 +1,20 @@
+[project]
+dependencies = [
+  "pipecat-ai[artesia,openai,silero,deepgram,websocket,runner]>=0.0.83",
+  "pipecatcloud>=0.2.4",
+  "supabase>=2.0.0",
+]
+description = "Twilio phone bot example using Pipecat"
+name = "pipecat-phone-bot-example"
+requires-python = ">=3.10"
+version = "0.1.0"
+
+[dependency-groups]
+dev = [
+  "ruff~=0.12.1",
+]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["I"]
