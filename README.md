@@ -82,7 +82,7 @@ SELECT * FROM claims ORDER BY created_at DESC LIMIT 100;
 - User: "Hi how can I help you?"
 - Bot: "I need information about a claim."
 - User: "Ok, what is the claim number?"
-- Bot: Speaks a claim number with exactly 10 digits and "000" consecutively (may be prefixed by 2–3 uppercase letters and optional dash, e.g., "QJ-7400005183", "AB000123456").
+- Bot: Speaks a claim number with exactly 10 digits and "000" consecutively (may be prefixed by 2–3 uppercase letters and optional dash, e.g., "QJ7400005183", "AB000123456").
 - User: "Ok, I've found the claim what do you need?"
 - Bot: Asks, one by one, waiting for answers:
   1. When was the claim submitted?

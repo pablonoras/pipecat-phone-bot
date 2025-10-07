@@ -144,16 +144,12 @@ async def run_bot(transport: BaseTransport, call_sid: str):
             convo_bot.append(text)
         if text and goodbye_marker in text.lower():
             hangup_scheduled["value"] = True
+            # Hang up immediately (Twilio REST), and upload in background
+            asyncio.create_task(end_call_after_delay())
 
-            # Upload consolidated conversation from LLM context now
-            async def _upload_and_hangup():
+            async def _upload_only():
                 try:
                     if not uploaded["value"]:
-                        from storage_supabase import add_conversation_record
-
-                        # Build arrays from OpenAI context messages
-                        bot_messages: list[str] = []
-                        user_messages: list[str] = []
                         try:
                             msgs = context.get_messages_for_persistent_storage()
                         except Exception:
@@ -190,9 +186,8 @@ async def run_bot(transport: BaseTransport, call_sid: str):
                         )
                 except Exception as e:
                     logger.exception(f"Conversation upload failed: {e}")
-                await end_call_after_delay()
 
-            asyncio.create_task(_upload_and_hangup())
+            asyncio.create_task(_upload_only())
 
     # No per-turn buffering; we read the final messages from context at end
 
