@@ -1,5 +1,5 @@
 agent_name = "phone-bot-example"
-image = "pablonoras/phone-bot-example:0.7"
+image = "pablonoras/phone-bot-example:0.13"
 secret_set = "phone-bot-example-secrets"
 
 [scaling]

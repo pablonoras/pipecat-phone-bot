@@ -2,7 +2,7 @@
 dependencies = [
   "aiortc>=1.11.0",
   "cartesia>=2.0.9",
-  "pipecat-ai[artesia,daily,deepgram,openai,runner,silero,webrtc,websocket]>=0.0.83",
+  "pipecat-ai[cartesia,daily,deepgram,openai,runner,silero,webrtc,websocket]",
   "pipecatcloud>=0.2.4",
   "supabase>=2.0.0",
   "twilio>=9.0.0",
