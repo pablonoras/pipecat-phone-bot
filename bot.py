@@ -20,6 +20,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -250,8 +251,12 @@ async def run_bot(transport: BaseTransport, call_sid: str):
     await runner.run(task)
 
 
-async def bot(runner_args: RunnerArguments):
+async def bot(runner_args):
     """Main bot entry point for the bot starter."""
+
+    # ===== LOCAL WEBSOCKET MODE (for ngrok/own server) =====
+    # Uncomment this block to run locally with Twilio WebSocket
+    """
     transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
     logger.info(f"Auto-detected transport: {transport_type}")
 
@@ -272,8 +277,27 @@ async def bot(runner_args: RunnerArguments):
             serializer=serializer,
         ),
     )
+    call_sid = call_data["call_id"]
+    """
 
-    await run_bot(transport, call_data["call_id"])
+    # ===== DAILY MODE (for Pipecat Cloud) =====
+    logger.info("Running on Pipecat Cloud (Daily transport)")
+    transport = DailyTransport(
+        runner_args.room_url,
+        runner_args.token,
+        "phone-bot-example",  # bot display name
+        DailyParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+            transcription_enabled=True,
+        ),
+    )
+    # Use Daily room name as call_sid for logging
+    call_sid = runner_args.room_url.split("/")[-1]
+
+    await run_bot(transport, call_sid)
 
 
 if __name__ == "__main__":
