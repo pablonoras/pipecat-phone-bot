@@ -27,17 +27,26 @@ def get_supabase_client() -> Client:
     return _supabase_client
 
 
-async def add_claim_record(
-    call_sid: str, claim_id: str, question: str, answer: str
+async def add_conversation_record(
+    call_sid: str, bot_messages: list[str], user_messages: list[str]
 ) -> bool:
+    # Deprecated: kept for backward compatibility if called elsewhere; do nothing
+    logger.info(
+        "add_conversation_record is deprecated; use add_conversation_messages instead"
+    )
+    return True
+
+
+async def add_conversation_messages(call_sid: str, messages: list[dict]) -> bool:
     """
-    Insert a new claim record into the Supabase 'claims' table.
+    Insert multiple conversation messages (one row per role/content) into 'claims'.
+
+    Each message dict should contain keys: 'role' and 'content'.
+    The function will add 'call_sid' before inserting.
 
     Args:
         call_sid: The Twilio call SID
-        claim_id: The generated claim ID
-        question: The question asked
-        answer: The answer provided
+        messages: List of role/content dicts
 
     Returns:
         True if successful, False otherwise
@@ -45,17 +54,21 @@ async def add_claim_record(
     try:
         client = get_supabase_client()
 
-        data = {
-            "call_sid": call_sid,
-            "claim_id": claim_id,
-            "question": question,
-            "answer": answer,
-        }
+        rows = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if not content:
+                continue
+            rows.append({"call_sid": call_sid, "role": role, "content": content})
 
-        result = client.table("claims").insert(data).execute()
-        logger.info(f"Stored claim record: {claim_id} | {question[:50]}...")
+        if not rows:
+            logger.info("No conversation messages to store")
+            return True
+
+        client.table("claims").insert(rows).execute()
+        logger.info(f"Stored {len(rows)} conversation messages for call {call_sid}")
         return True
-
     except Exception as e:
-        logger.error(f"Failed to store claim record: {e}")
+        logger.error(f"Failed to store conversation messages: {e}")
         return False
