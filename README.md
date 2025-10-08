@@ -94,7 +94,7 @@ Create a `claims` table with:
 - `content` (text) - the message content
 - `created_at` (timestamptz, default: `now()`)
 
-View stored conversations at supabase public endpoint using the public key. 
+View stored conversations at supabase public endpoint using the public key.
 
 Or query via SQL:
 
@@ -110,10 +110,11 @@ SELECT * FROM claims ORDER BY created_at DESC LIMIT 100;
 - Bot: Speaks a claim number with exactly 10 digits and "000" consecutively (may be prefixed by 2–3 uppercase letters and optional dash, e.g., "QJ7400005183", "AB000123456").
 - User: "Ok, I've found the claim what do you need?"
 - Bot: Asks, one by one, waiting for answers:
+
   1. When was the claim submitted?
   2. What is the status?
   3. What is the claim number?
 
-- New added behavior: The Bot will check if the claim number correspond to the user answer of the last question, if so, it will say "Got it, thank you, and have a nice day." if not it will tell the number again and repeat the 3 questions. 
+- New added behavior: The Bot will check if the claim number correspond to the user answer of the last question, if so, it will say "Got it, thank you, and have a nice day." if not it will tell the number again and repeat the 3 questions.
 
 - No hangup logic added for simplicity (out of the scope).

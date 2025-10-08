@@ -6,7 +6,7 @@ from typing import Optional
 
 from loguru import logger
 
-# Global state to track current claim ID per call
+# Global state to track current claim ID per call, simple approach for this challenge. 
 _claim_ids: dict[str, str] = {}
 
 
