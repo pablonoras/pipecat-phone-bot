@@ -6,7 +6,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame, LLMRunFrame, LLMTextFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -34,45 +34,23 @@ load_dotenv(override=True)
 async def run_bot(transport: BaseTransport, call_sid: str):
     logger.info(f"Starting bot for call {call_sid}")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"), interim_results=True
+    )
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # British Reading Lady
     )
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), streaming=True)
 
     # Generate claim_id at call start and make it available to the prompt
     claim_id = await generate_claim_id(call_sid)
-
-    # Task reference for ending the call
-    task_ref = {"task": None}
-
-    async def _hangup_twilio_call():
-        try:
-            from twilio.rest import Client
-
-            client = Client(
-                os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")
-            )
-            client.calls(call_sid).update(status="completed")
-        except Exception as e:
-            logger.exception(f"Twilio SDK hangup failed: {e}")
-
-    async def end_call_after_delay():
-        """End the call after 3.5 seconds to let TTS fully finish."""
-        await asyncio.sleep(3.5)
-        logger.info("Ending call...")
-        # Simple: directly instruct Twilio to complete the call. The websocket
-        # will close, triggering on_client_disconnected → task.cancel().
-        await _hangup_twilio_call()
 
     # No tools; we'll buffer locally and upload once at the end
     tools = ToolsSchema(standard_tools=[])
 
     # Upload guard to avoid double writes
     uploaded = {"value": False}
-    convo_bot: list[str] = []
-    convo_user: list[str] = []
 
     # Build a runtime prompt that embeds the generated claim_id and ordered instructions
     script_prompt = (
@@ -125,72 +103,6 @@ async def run_bot(transport: BaseTransport, call_sid: str):
         ),
         observers=[RTVIObserver(rtvi)],
     )
-
-    # Store task reference so end_call_after_delay can access it
-    task_ref["task"] = task
-
-    # Track last assistant text to pair with next user transcription for logging
-    task.set_reached_downstream_filter((LLMTextFrame,))
-    goodbye_marker = "got it, thank you, and have a nice day"
-    hangup_scheduled = {"value": False}
-    last_bot_text = {"text": ""}
-
-    @task.event_handler("on_frame_reached_downstream")
-    async def on_frame_reached_downstream(task, frame):
-        if hangup_scheduled["value"]:
-            return
-        text = getattr(frame, "text", "")
-        if text:
-            last_bot_text["text"] = text
-            convo_bot.append(text)
-        if text and goodbye_marker in text.lower():
-            hangup_scheduled["value"] = True
-            # Hang up immediately (Twilio REST), and upload in background
-            asyncio.create_task(end_call_after_delay())
-
-            async def _upload_only():
-                try:
-                    if not uploaded["value"]:
-                        try:
-                            msgs = context.get_messages_for_persistent_storage()
-                        except Exception:
-                            msgs = context.messages
-
-                        def extract_text(content):
-                            if isinstance(content, str):
-                                return content
-                            if isinstance(content, list):
-                                parts = []
-                                for item in content:
-                                    if (
-                                        isinstance(item, dict)
-                                        and item.get("type") == "text"
-                                    ):
-                                        parts.append(item.get("text", ""))
-                                return " ".join([p for p in parts if p])
-                            return ""
-
-                        rows = []
-                        for m in msgs:
-                            text = extract_text(m.get("content"))
-                            if text:
-                                rows.append({"role": m.get("role"), "content": text})
-
-                        from storage_supabase import add_conversation_messages
-
-                        ok = await add_conversation_messages(call_sid, rows)
-                        uploaded["value"] = True
-                        logger.info(
-                            "Uploaded consolidated conversation"
-                            if ok
-                            else "Failed to upload conversation"
-                        )
-                except Exception as e:
-                    logger.exception(f"Conversation upload failed: {e}")
-
-            asyncio.create_task(_upload_only())
-
-    # No per-turn buffering; we read the final messages from context at end
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -254,29 +166,50 @@ async def run_bot(transport: BaseTransport, call_sid: str):
 async def bot(runner_args):
     """Main bot entry point for the bot starter."""
 
-    # ===== LOCAL WEBSOCKET MODE (for ngrok/own server) =====
-    # Uncomment this block to run locally with Twilio WebSocket
-    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
-    logger.info(f"Auto-detected transport: {transport_type}")
+    # Detect mode: WebSocket (Twilio) or Daily (Sandbox)
+    if hasattr(runner_args, "websocket") and runner_args.websocket:
+        # ===== WEBSOCKET MODE (Twilio via ngrok or Pipecat Cloud) =====
+        logger.info("Running in WebSocket mode (Twilio)")
+        transport_type, call_data = await parse_telephony_websocket(
+            runner_args.websocket
+        )
+        logger.info(f"Auto-detected transport: {transport_type}")
 
-    serializer = TwilioFrameSerializer(
-        stream_sid=call_data["stream_id"],
-        call_sid=call_data["call_id"],
-        account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
-        auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
-    )
+        serializer = TwilioFrameSerializer(
+            stream_sid=call_data["stream_id"],
+            call_sid=call_data["call_id"],
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        )
 
-    transport = FastAPIWebsocketTransport(
-        websocket=runner_args.websocket,
-        params=FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            add_wav_header=False,
-            vad_analyzer=SileroVADAnalyzer(),
-            serializer=serializer,
-        ),
-    )
-    call_sid = call_data["call_id"]
+        transport = FastAPIWebsocketTransport(
+            websocket=runner_args.websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                add_wav_header=False,
+                vad_analyzer=SileroVADAnalyzer(),
+                serializer=serializer,
+            ),
+        )
+        call_sid = call_data["call_id"]
+
+    else:
+        # ===== DAILY MODE (Sandbox/Testing) =====
+        logger.info("Running in Daily mode (Sandbox)")
+
+        # Manually create Daily transport
+        transport = DailyTransport(
+            runner_args.room_url,
+            runner_args.token,
+            "phone-bot-example",
+            DailyParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
+        )
+        call_sid = getattr(runner_args, "session_id", "phone-bot-example")
 
     await run_bot(transport, call_sid)
 

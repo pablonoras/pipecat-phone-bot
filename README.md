@@ -1,6 +1,6 @@
-## Prosper AI Voice Agent (Pipecat + Twilio)
+## AI Voice Agent (Pipecat + Twilio)
 
-Build a phone-accessible voice agent using Pipecat. The bot runs with Deepgram (STT), OpenAI (LLM), Cartesia (TTS) and Twilio Media Streams.
+Phone-accessible voice agent using Pipecat. The bot runs with Deepgram (STT), OpenAI (LLM), Cartesia (TTS) and Twilio Media Streams.
 
 ## Prerequisites
 
@@ -37,42 +37,67 @@ Build a phone-accessible voice agent using Pipecat. The bot runs with Deepgram (
 
 4. Configure Twilio number → Voice → "A call comes in" → Webhook → `https://<your-ngrok>.ngrok.io` (POST).
 
-## Setup (online, production)
-
-- Run the server behind a public HTTPS domain (no ngrok). Options:
-  - Deploy to your infra (e.g., Docker on a VM, container service, or Kubernetes)
-  - Or deploy to Pipecat Cloud (TBD for this project)
-- Point Twilio → Voice → "A call comes in" → Webhook to `https://your-domain` (POST)
-- Manage secrets via your platform's secret manager (no `.env` in production)
-- Ensure TLS certs are valid and choose a region close to Twilio for lower latency
-
-## Run
+5. Run
 
 ```bash
 uv run bot.py --transport twilio --proxy <your-ngrok>.ngrok.io
 ```
 
+## Setup (online, production)
+
+This project is configured for deployment on **Pipecat Cloud**:
+
+1. **Deploy to Pipecat Cloud:**
+
+   - Configure `pcc-deploy.toml` with your service settings
+   - Deploy using `pcc deploy` command
+   - Pipecat Cloud will provide a secure WebSocket endpoint URL
+
+2. **Configure Twilio TwiML Bin:**
+
+   - Go to Twilio Console → TwiML Bins → Create new
+   - Add TwiML code that connects to your Pipecat Cloud WebSocket endpoint:
+     ```xml
+     <?xml version="1.0" encoding="UTF-8"?>
+     <Response>
+       <Connect>
+         <Stream url="wss://your-pipecat-cloud-endpoint.pipecat.ai" />
+          <Parameter name="_pipecatCloudServiceHost" value="{bot-name}.{org-name}"/>
+       </Connect>
+     </Response>
+     ```
+   - Save the TwiML Bin and copy its URL
+
+3. **Point Twilio number to TwiML Bin:**
+
+   - Go to your Twilio phone number settings
+   - Voice → "A call comes in" → TwiML Bin → Select your bin
+   - Save configuration
+
+4. **Environment variables:**
+   - Configure secrets in Pipecat Cloud dashboard (no `.env` in production)
+   - Required: API keys for Deepgram, OpenAI, Cartesia, and Supabase credentials
+
 Call your Twilio number to talk to the bot.
 
 ## Supabase Integration
 
-The bot stores conversation data (claim IDs and Q&A pairs) in Supabase.
+The bot stores conversation data (call_sid, role, content, created_at) in Supabase.
 
 **Database Schema:**
 
 Create a `claims` table with:
+
 - `id` (uuid, primary key, default: `gen_random_uuid()`)
 - `call_sid` (text)
-- `claim_id` (text)
-- `question` (text)
-- `answer` (text)
+- `role` (text) - either 'user' or 'assistant'
+- `content` (text) - the message content
 - `created_at` (timestamptz, default: `now()`)
 
-**View Logs:**
-
-View stored conversations at: `https://<your-project>.supabase.co/project/<project-id>/editor/<table-id>`
+View stored conversations at supabase public endpoint using the public key. 
 
 Or query via SQL:
+
 ```sql
 SELECT * FROM claims ORDER BY created_at DESC LIMIT 100;
 ```
@@ -88,21 +113,7 @@ SELECT * FROM claims ORDER BY created_at DESC LIMIT 100;
   1. When was the claim submitted?
   2. What is the status?
   3. What is the claim number?
-- Bot: Says "Got it, thank you, and have a nice day." and automatically ends the call after 2 seconds.
 
-## Logging
+- New added behavior: The Bot will check if the claim number correspond to the user answer of the last question, if so, it will say "Got it, thank you, and have a nice day." if not it will tell the number again and repeat the 3 questions. 
 
-- Prints concise turns to stdout: `user: ...`, `assistant: ...`.
-
-## Deliverables guidance
-
-- Phone number reachable to test the agent (Twilio).
-- Public site for conversation results (e.g., expose recent transcript JSON or simple HTML).
-- GitHub repo (this project).
-- Short latency evaluation: total; optionally per STT/LLM/TTS. Note ideas: stream early, smaller/faster models, reduce prompt/context, keep RTT low.
-
-## Troubleshooting
-
-- Verify ngrok URL in Twilio config.
-- Ensure `.env` keys are set.
-- Start ngrok before calling.
+- No hangup logic added for simplicity (out of the scope).
